@@ -3,110 +3,126 @@
 //  Helpers.js
 //
 
-'use strict;'
+"use strict;";
 
 class ShaderProgram {
-    constructor(gl, object, vertexShader, fragmentShader) {
-        let program = initShaders(gl, vertexShader, fragmentShader);
-        let numUniforms = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
-        
-        let uniformFuncs = [];
-        
-        for (let i = 0; i < numUniforms; ++i) {
-            let uniform = gl.getActiveUniform(program, i);
-            let name = uniform.name;
-            let location = gl.getUniformLocation(program, name);
-        
-            switch (uniform.type) {
-                case gl.FLOAT:
-                    uniformFuncs.push(() => gl.uniform1f(location, object[name]));
-                    break;
-        
-                case gl.FLOAT_MAT4:
-                    uniformFuncs.push(() => gl.uniformMatrix4fv(location, false, flatten(object[name])));
-                    break;
-        
-                default:
-                    console.log("Unknown uniform type " + uniform.type);
-            }
+  constructor(gl, object, vertexShader, fragmentShader) {
+    let program = initShaders(gl, vertexShader, fragmentShader);
+    let numUniforms = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
 
-            object[name] = undefined;
-        }
+    let uniformFuncs = [];
 
-        this.program = program;
+    for (let i = 0; i < numUniforms; ++i) {
+      let uniform = gl.getActiveUniform(program, i);
+      let name = uniform.name;
+      let location = gl.getUniformLocation(program, name);
 
-        this.use = () => {
-            gl.useProgram(program);
-            for (let f of uniformFuncs) {
-                f();
-            }
-        }
+      switch (uniform.type) {
+        case gl.FLOAT:
+          uniformFuncs.push(() => gl.uniform1f(location, object[name]));
+          break;
+
+        case gl.FLOAT_MAT4:
+          uniformFuncs.push(() =>
+            gl.uniformMatrix4fv(location, false, flatten(object[name])),
+          );
+          break;
+
+        default:
+          console.log("Unknown uniform type " + uniform.type);
+      }
+
+      object[name] = undefined;
     }
-};
+
+    this.program = program;
+
+    this.use = () => {
+      gl.useProgram(program);
+      for (let f of uniformFuncs) {
+        f();
+      }
+    };
+  }
+}
 
 class Attribute {
-    constructor(gl, shaderProgram, name, values, numComponents, type, 
-        normalize = false, stride = 0, offset = 0) {
+  constructor(
+    gl,
+    shaderProgram,
+    name,
+    values,
+    numComponents,
+    type,
+    normalize = false,
+    stride = 0,
+    offset = 0,
+  ) {
+    let program = shaderProgram.program;
 
-        let program = shaderProgram.program;
+    let buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, values, gl.STATIC_DRAW);
 
-        let buffer = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-        gl.bufferData(gl.ARRAY_BUFFER, values, gl.STATIC_DRAW);
+    let index = gl.getAttribLocation(program, name);
 
-        let index = gl.getAttribLocation(program, name);
+    this.count = values.length / numComponents;
 
-        this.count = values.length / numComponents;
-        
-        if (stride != 0) {
-            offset = numComponents * values.BYTES_PER_ELEMENT;
-        }
-
-        this.enable = () => {
-            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-            gl.vertexAttribPointer(index, numComponents, type, 
-                normalize, stride, offset);
-            gl.enableVertexAttribArray(index);
-        };
-
-        this.disable = () => {
-            gl.disableVertexAttribArray(index);
-            gl.bindBuffer(gl.ARRAY_BUFFER, null);
-        }
+    if (stride != 0) {
+      offset = numComponents * values.BYTES_PER_ELEMENT;
     }
-};
+
+    this.enable = () => {
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.vertexAttribPointer(
+        index,
+        numComponents,
+        type,
+        normalize,
+        stride,
+        offset,
+      );
+      gl.enableVertexAttribArray(index);
+    };
+
+    this.disable = () => {
+      gl.disableVertexAttribArray(index);
+      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    };
+  }
+}
 
 class Indices {
-    constructor(gl, indices) {
-        let buffer = gl.createBuffer();
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer);
-        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+  constructor(gl, indices) {
+    let buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 
-        this.count = indices.length;
-        this.type = {
-            1 : gl.UNSIGNED_BYTE,
-            2 : gl.UNSIGNED_SHORT,
-            4 : gl.UNSIGNED_INT
-        }[indices.BYTES_PER_ELEMENT];
+    this.count = indices.length;
+    this.type = {
+      1: gl.UNSIGNED_BYTE,
+      2: gl.UNSIGNED_SHORT,
+      4: gl.UNSIGNED_INT,
+    }[indices.BYTES_PER_ELEMENT];
 
-        this.enable = () => gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer);
-        this.disable = () => gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
-    };
-};
+    this.enable = () => gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer);
+    this.disable = () => gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+  }
+}
 
 class AABB {
-    constructor(gl, object, min, max) {
-        this.min = min;
-        this.max = max;
+  constructor(gl, object, min, max) {
+    this.min = min;
+    this.max = max;
 
-        this.extents = min.map((x, i) => max[i] - x);
-        this.center = min.map((x, i) => 0.5 * (x + max[i]));
-        let r = 0.0;
-        this.extents.map((x, i) => r += x*x);
-        this.diameter = Math.sqrt(r);
-        this.radius = 0.5 * this.diameter;
+    this.extents = min.map((x, i) => max[i] - x);
+    this.center = min.map((x, i) => 0.5 * (x + max[i]));
+    let r = 0.0;
+    this.extents.map((x, i) => (r += x * x));
+    this.diameter = Math.sqrt(r);
+    this.radius = 0.5 * this.diameter;
 
-        let vertexShader = `
+    let vertexShader = `
             uniform mat4 P;
             uniform mat4 MV;
 
@@ -147,7 +163,7 @@ class AABB {
             }
         `;
 
-        let fragmentShader = `
+    let fragmentShader = `
             uniform vec4 color;
             out vec4 fColor;
 
@@ -156,16 +172,17 @@ class AABB {
             }
         `;
 
-        let program = new ShaderProgram(gl, this, vertexShader, fragmentShader);
+    let program = new ShaderProgram(gl, this, vertexShader, fragmentShader);
 
-        this.color = vec4(1.0, 1.0, 1.0, 1.0);
+    this.color = vec4(1.0, 1.0, 1.0, 1.0);
 
-        this.draw = () => {
-            program.use();
-            
-            gl.drawArrays(gl.LINES, 0, 24);
+    this.draw = () => {
+      program.use();
 
-            gl.useProgram(null);
-        }
-    }
+      gl.drawArrays(gl.LINES, 0, 24);
+
+      gl.useProgram(null);
+    };
+  }
 }
+

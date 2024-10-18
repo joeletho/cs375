@@ -8,7 +8,6 @@
     <script src="BasicCube.js"></script>
     <script src="IndexedCube.js"></script>
     <script src="ExperimentalCube.js"></script>
-
     <script>
         window.onload = () => {
             let canvas = document.getElementById("webgl-canvas");
@@ -17,8 +16,8 @@
             gl.clearColor(0.2, 0.2, 0.2, 1.0);
             gl.enable(gl.DEPTH_TEST);
 
-            let cube = new BasicCube(gl);
-            // let cube = new IndexedCube(gl);
+            // let cube = new BasicCube(gl);
+            let cube = new IndexedCube(gl);
             // let cube = new ExperimentalCube(gl);
             let axes = new Axes(gl);
             let ms = new MatrixStack;
@@ -53,8 +52,7 @@
             render();
         };
     </script>
-
     <body>
-    <canvas id="webgl-canvas" width="512" height="512"></canvas>
+        <canvas id="webgl-canvas" width="512" height="512"></canvas>
     </body>
 </html>
