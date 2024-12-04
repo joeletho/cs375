@@ -182,11 +182,11 @@ function createEarth() {
 }
 
 function createMars() {
-  const phobos = createBody("Phobos", undefined, 110 * METER, 38440 * METER);
+  const phobos = createBody("Phobos", undefined, 110 * METER, MARS_RADIUS * 8);
   phobos.setRotationSpeed(0);
   phobos.setPeriod(2);
 
-  const deimos = createBody("Deimos", undefined, 60 * METER, 38440 * METER);
+  const deimos = createBody("Deimos", undefined, 60 * METER, MARS_RADIUS * 6);
   deimos.setRotationSpeed(0);
   deimos.setPeriod(2);
 

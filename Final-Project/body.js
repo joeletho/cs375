@@ -29,7 +29,6 @@ export class Body extends THREE.Object3D {
     this.orbitAngle = 0;
     this.period = ONE_REVOLUTION;
     this.position.set(distance, 0, 0);
-    this.elapsedTime = 0;
   }
 
   setRotationSpeed(speed) {
@@ -53,6 +52,7 @@ export class Body extends THREE.Object3D {
 
     this.dispatchEvent({
       type: "update",
+      name: this.name,
       rotation: this.rotation,
       position: this.position,
     });

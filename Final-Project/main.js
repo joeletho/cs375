@@ -18,22 +18,34 @@ const fov = 50;
 const near = 1;
 const far = 1_000_000_000;
 
-let rootContainer, stats, gui, labelRenderer;
-let userCamera, userScene, userRenderer;
-let followCamera, followScene, followRenderer;
+let rootContainer;
+let stats;
+let gui;
 
-let selectedObject = null;
+let userCamera;
+let userScene;
+let userRenderer;
+let labelRenderer;
+
+let previewCamera;
+let previewScene;
+let previewRenderer;
+
+let previewObject = null;
+let focusedObject = null;
+let lookingAt = false;
+
 const cameraFlags = {
   user: {
     lockCamera: false,
     lockRotation: false,
     lockPosition: false,
+    focus: false,
   },
-  follow: {
+  preview: {
     lockCamera: true,
     lockRotation: true,
     lockPosition: true,
-    focus: false,
   },
 };
 
@@ -64,7 +76,7 @@ function init() {
   userCamera = new PerspectiveCamera(fov, aspect, near, far, {
     enableEvents: true,
   });
-  userCamera.setOrigin(-6000, 5000, 0);
+  userCamera.setOrigin(0, 0, 0);
   userCamera.setDefaultRoll(-45, 0);
   userCamera.reset();
 
@@ -127,12 +139,35 @@ function render() {
 
   updateUserCamera();
   updateUserRenderer();
-  updateFollowCamera();
-  updateFollowRenderer();
+  updatePreviewCamera();
+  updatePreviewRenderer();
 }
 
 function updateUserCamera() {
   userCamera.setAspect(aspect);
+
+  if (lookingAt) {
+    const object = getObjectByName(
+      objectRoot,
+      objectsStates.find((state) => state.lookAt).name,
+    );
+    if (!focusedObject) {
+      userCamera.lookAtObject(object);
+    } else {
+      const offset = new THREE.Vector3(
+        object.radius * 10,
+        object.radius * 5,
+        0,
+      );
+      const objectWorldPosition = new THREE.Vector3();
+      object.getWorldPosition(objectWorldPosition);
+
+      const newCameraPosition = objectWorldPosition.clone().add(offset);
+      userCamera.position.copy(newCameraPosition);
+
+      userCamera.lookAt(objectWorldPosition);
+    }
+  }
   userCamera.update();
 }
 
@@ -154,10 +189,12 @@ function updateSceneObjects(dt) {
         }
         if (!objectRoot) {
           objectRoot = obj;
-          initFollowCamera();
+          initPreviewCamera();
           gui = initGUI();
-          // Set default follow object
-          selectFollowObject("follow", objectRoot, "Sun");
+          // Set default focus and preview objects
+          selectFocusObject(objectRoot, "Sun");
+          selectPreviewObject(objectRoot, "Sun");
+
           userCamera.addEventListener("update", function (event) {
             gui.controllers.forEach((controller) => controller.updateDisplay());
           });
@@ -180,11 +217,11 @@ function updateSceneObjects(dt) {
   });
 }
 
-function updateFollowRenderer() {
-  followRenderer?.setClearColor(0x000000, 1);
-  followRenderer?.setScissor(0, 0, FOLLOW_WIDTH, FOLLOW_HEIGHT);
-  followRenderer?.setViewport(0, 0, FOLLOW_WIDTH, FOLLOW_HEIGHT);
-  followRenderer?.render(followScene, followCamera);
+function updatePreviewRenderer() {
+  previewRenderer?.setClearColor(0x000000, 1);
+  previewRenderer?.setScissor(0, 0, FOLLOW_WIDTH, FOLLOW_HEIGHT);
+  previewRenderer?.setViewport(0, 0, FOLLOW_WIDTH, FOLLOW_HEIGHT);
+  previewRenderer?.render(previewScene, previewCamera);
 }
 
 function getObjectByName(root, name) {
@@ -222,113 +259,115 @@ function getObjectByName(root, name) {
 }
 
 function onSelectedObjectUpdate(event) {
-  selectedObject.rotation.copy(event.rotation);
-  selectedObject.position.copy(event.position);
+  previewObject.rotation.copy(event.rotation);
+  previewObject.position.copy(event.position);
 }
 
 function fitObjectInViewport(camera, object) {
   const paddingFactor = 1.5;
   let scale;
-  if (camera.isOrthographic) {
+  if (camera.isOrthographicCamera) {
     scale =
       camera.getViewportDimensions().width /
       (2 * object.radius * paddingFactor);
-  } else {
-    let position = new THREE.Vector3();
-    object.getWorldPosition(position);
-    const distance = object.radius * 10;
-    camera.setPosition(-distance, distance, 0);
-
-    const { width, height } = camera.getViewportDimensions(distance);
-    const diameter = object.radius * 2;
-    const maxViewportDimension = Math.min(width, height);
-
-    scale = maxViewportDimension / (diameter * paddingFactor);
+    camera.setZoom(scale);
   }
-  camera.setZoom(scale);
 }
 
-function selectFollowObject(cameraName, objectParent, objectName) {
+function selectFocusObject(objectParent, objectName) {
+  objectsStates.forEach((state) => (state.focus = state.name === objectName));
+  focusedObject = getObjectByName(objectParent, objectName);
+}
+
+function onFocusObjectChange(objectName, focused) {
+  const settings = getGUIControllerByName(gui, "Camera Settings");
+  const userSettings = getGUIControllerByName(settings, "User");
+  setGUIControllerValue(userSettings, "lockCamera", focused);
+
+  const objects = getGUIControllerByName(gui, "Objects");
+  const objectSettings = getGUIControllerByName(objects, objectName);
+  setGUIControllerValue(objectSettings, "lookAt", focused);
+
+  if (focused) {
+    selectFocusObject(objectRoot, objectName);
+  } else {
+    objectsStates.forEach((state) => (state.focus = false));
+  }
+}
+
+function onLookAtObjectChange(objectName, lookAt) {
+  const object = getObjectByName(objectRoot, objectName);
+  objectsStates.forEach((state) => {
+    if (state.name === objectName) {
+      if (lookAt) {
+        userCamera.lookAt(object.position);
+      }
+      state.lookAt = lookAt;
+      lookingAt = lookAt;
+    } else {
+      state.lookAt = false;
+    }
+  });
+}
+
+function selectPreviewObject(objectParent, objectName) {
   const obj = getObjectByName(objectParent, objectName);
   if (!obj) {
     return;
   }
 
-  if (cameraName === "follow") {
-    if (selectedObject) {
-      // Remove existing event listener
-      const prevObj = getObjectByName(objectParent, selectedObject.name);
-      if (prevObj.hasEventListener("update", onSelectedObjectUpdate)) {
-        prevObj.removeEventListener("update", onSelectedObjectUpdate);
-      }
-
-      // Erase all objects
-      followScene.children = [];
+  if (previewObject) {
+    // Remove existing event listener
+    const prevObj = getObjectByName(objectParent, previewObject.name);
+    if (prevObj.hasEventListener("update", onSelectedObjectUpdate)) {
+      prevObj.removeEventListener("update", onSelectedObjectUpdate);
     }
 
-    obj.addEventListener("update", onSelectedObjectUpdate);
-
-    selectedObject = obj.clone(selectedObject);
-    followScene.add(selectedObject);
+    // Erase all objects
+    previewScene.children = [];
   }
 
-  const hasFocus = objectsStates.find(
-    (state) => state.name === obj.name && state.focus,
-  );
-  if (cameraName === "follow" || (cameraName === "user" && hasFocus)) {
-    fitObjectInViewport(getCameraByName(cameraName), obj);
-  }
+  obj.addEventListener("update", onSelectedObjectUpdate);
+
+  previewObject = obj.clone(previewObject);
+  previewScene.add(previewObject);
+
+  fitObjectInViewport(previewCamera, previewObject);
 }
 
-function updateFollowCamera() {
-  if (!selectedObject || !followCamera) {
+function updatePreviewCamera() {
+  if (!previewObject || !previewCamera) {
     return;
   }
 
-  if (cameraFlags["follow"].lockPosition) {
-    followCamera.setPosition(
-      selectedObject.position.x - far / 100,
-      selectedObject.position.y + far / 100,
-      selectedObject.position.z,
+  if (cameraFlags["preview"].lockPosition) {
+    previewCamera.setPosition(
+      previewObject.position.x - far / 100,
+      previewObject.position.y + far / 100,
+      previewObject.position.z,
     );
   }
 
-  if (cameraFlags["follow"].lockRotation) {
-    followCamera.lookAtObject(selectedObject);
-  }
-
-  const curr = getObjectByName(objectRoot, selectedObject.name);
-  let position = new THREE.Vector3();
-  position = curr.getWorldPosition(position);
-
-  // position = userCamera.worldToLocal(position);
-  if (cameraFlags["user"].lockCamera || cameraFlags["user"].lockPosition) {
-  }
-
-  if (
-    objectsStates.find(
-      (state) => state.focus && state.name === selectedObject.name,
-    )
-  ) {
-    userCamera.lookAt(position);
+  if (cameraFlags["preview"].lockRotation) {
+    previewCamera.lookAtObject(previewObject);
   }
 }
 
-function initFollowRenderer() {
+function initPreviewRenderer() {
   const container = document.createElement("div");
-  container.id = "follow-camera";
+  container.id = "preview-camera";
   container.style.width = FOLLOW_WIDTH;
   container.style.height = FOLLOW_WIDTH;
   container.style.borderWidth = "1px";
   container.style.border = "solid";
   container.style.borderColor = "#1c1c1c";
-  followRenderer = initRenderer(container, FOLLOW_WIDTH, FOLLOW_WIDTH);
-  return followRenderer;
+  previewRenderer = initRenderer(container, FOLLOW_WIDTH, FOLLOW_WIDTH);
+  return previewRenderer;
 }
 
-function initFollowCamera() {
-  followCamera = new OrthographicCamera(-2, 2, 2, -2, near, far);
-  followScene = new THREE.Scene();
+function initPreviewCamera() {
+  previewCamera = new OrthographicCamera(-2, 2, 2, -2, near, far);
+  previewScene = new THREE.Scene();
 }
 
 function initGUI() {
@@ -344,7 +383,7 @@ function initGUI() {
   FOLLOW_WIDTH = guiDom.offsetWidth - 5;
   FOLLOW_HEIGHT = FOLLOW_WIDTH;
 
-  const renderer = initFollowRenderer();
+  const renderer = initPreviewRenderer();
   guiDom.appendChild(renderer.domElement.parentElement);
 
   gui.title("Solar Perspective");
@@ -353,8 +392,8 @@ function initGUI() {
   const cameraFolder = gui.addFolder("Camera Settings").close();
   const userFolder = cameraFolder.addFolder("User").close();
   makeCameraSettingsFolder(userFolder, "user");
-  const followFolder = cameraFolder.addFolder("Follow").close();
-  makeCameraSettingsFolder(followFolder, "follow");
+  const previewFolder = cameraFolder.addFolder("Preview").close();
+  makeCameraSettingsFolder(previewFolder, "preview");
 
   // Objects
   const objectsFolder = gui.addFolder("Objects").close();
@@ -375,8 +414,8 @@ function getCameraByName(name) {
   switch (name) {
     case "user":
       return userCamera;
-    case "follow":
-      return followCamera;
+    case "preview":
+      return previewCamera;
   }
 }
 
@@ -386,19 +425,10 @@ function makeCameraSettingsFolder(controller, name) {
     .add(cameraFlags[name], "lockCamera")
     .listen()
     .onChange((value) => {
-      console.log(name);
-      if (controller.property === "User") {
-        if (value) {
-          const parent = getObjectByName(objectRoot, selectedObject.name);
-          const camera = getCameraByName(name);
-          parent.add(camera);
-          fitObjectInViewport(camera, parent);
+      if (value) {
+        if (controller.property === "User") {
         } else {
-          const camera = getCameraByName(name);
-          const position = new THREE.Vector3();
-          camera.getWorldPosition(position);
-          camera.parent = null;
-          camera.position.copy(position);
+          fitObjectInViewport(previewCamera, previewObject);
         }
       }
       cameraFlags[name].lockCamera = value;
@@ -515,7 +545,7 @@ function makeObjectFolder(contoller, objectRoot, objectName) {
   const objectFolder = contoller.addFolder(objectName).close();
   objectFolder.onOpenClose((con) => {
     if (!con._closed) {
-      selectFollowObject("follow", objectRoot, objectName);
+      selectPreviewObject(objectRoot, objectName);
     }
   });
   objectFolder
@@ -525,16 +555,7 @@ function makeObjectFolder(contoller, objectRoot, objectName) {
     )
     .listen()
     .onChange((value) => {
-      const settings = getGUIControllerByName(gui, "Camera Settings");
-      const userSettings = getGUIControllerByName(settings, "User");
-      setGUIControllerValue(userSettings, "lockCamera", value);
-      if (value) {
-        objectsStates.forEach(
-          (state) => (state.focus = state.name === objectName),
-        );
-      } else {
-        objectsStates.forEach((state) => (state.focus = false));
-      }
+      onFocusObjectChange(objectName, value);
     });
   objectFolder
     .add(
@@ -543,16 +564,13 @@ function makeObjectFolder(contoller, objectRoot, objectName) {
     )
     .listen()
     .onChange((value) => {
-      if (value) {
-        userCamera.lookAt(object.position);
-      }
-      objectsStates.find((state) => state.name).lookAt = value;
+      onLookAtObjectChange(objectName, value);
     });
   objectFolder.add({ showAxes: true }, "showAxes").onChange((value) => {
     object.showAxes(value);
-    // Update the object on the follow camera
-    if (selectedObject && selectedObject.name === objectName) {
-      selectFollowObject("follow", objectRoot, objectName);
+    // Update the object on the preview camera
+    if (previewObject && previewObject.name === objectName) {
+      selectPreviewObject(objectRoot, objectName);
     }
   });
   objectFolder.add(object, "distance").listen().disable();
@@ -600,6 +618,5 @@ function getGUIControllerByName(root, name) {
       }
     }
   }
-
-  throw new Error(`Cannot find controller with name "${name}"`);
+  return null;
 }
