@@ -6,44 +6,40 @@ export const DEFAULT_MOVEMENT_STEP = 2;
 export const ZOOM_FACTOR = 8;
 
 export function setDefaultState(camera) {
-  camera.state = {
-    direction: {
-      pitch: 0,
-      yaw: 0,
-      sensitivity: DEFAULT_MOUSE_SENSITIVITY,
-    },
-
-    events: {
-      prevMouseX: null,
-      prevMouseY: null,
-    },
-
+  const defaultState = {
+    zoom: 1,
+    pitch: 0,
+    yaw: 0,
+    direction: new THREE.Vector3(1, 0, 0),
+    sensitivity: DEFAULT_MOUSE_SENSITIVITY,
+    isLooking: false,
+    originChanged: false,
+    isMoving: false,
+    isLocked: false,
     movement: {
       forward: 0,
       right: 0,
       up: 0,
       speed: DEFAULT_MOVEMENT_SPEED,
     },
-
-    default: {
-      direction: {
-        zoom: 1,
-        pitch: 0,
-        yaw: 0,
-        lookAt: calculateLookAt(camera, 0, 0),
-        sensitivity: DEFAULT_MOUSE_SENSITIVITY,
-      },
-      movement: {
-        speed: DEFAULT_MOVEMENT_SPEED,
-      },
-    },
-    flags: {
-      isLooking: false,
-      originChanged: false,
-      isMoving: false,
-      isLocked: false,
+    events: {
+      prevMouseX: null,
+      prevMouseY: null,
     },
   };
+
+  camera.zoom = defaultState.zoom;
+  camera.pitch = defaultState.pitch;
+  camera.yaw = defaultState.yaw;
+  camera.direction = defaultState.direction;
+  camera.sensitivity = defaultState.sensitivity;
+  camera.isLooking = defaultState.isLooking;
+  camera.originChanged = defaultState.originChanged;
+  camera.isMoving = defaultState.isMoving;
+  camera.isLocked = defaultState.isLocked;
+  camera.movement = defaultState.movement;
+  camera.events = defaultState.events;
+  camera.default = defaultState;
 }
 
 export function calculateLookAt(camera, pitch, yaw) {
@@ -60,9 +56,12 @@ export function calculateLookAt(camera, pitch, yaw) {
 }
 
 export function moveCamera(camera, forward, right, up, speed) {
+  forward = typeof forward === "undefined" || isNaN(forward) ? 0 : forward;
+  right = typeof right === "undefined" || isNaN(right) ? 0 : right;
+  up = typeof up === "undefined" || isNaN(up) ? 0 : up;
+
   const cameraForward = new THREE.Vector3();
   camera.getWorldDirection(cameraForward);
-
   cameraForward.normalize();
 
   const cameraRight = new THREE.Vector3();
@@ -72,6 +71,7 @@ export function moveCamera(camera, forward, right, up, speed) {
   cameraUp.copy(camera.up).normalize();
 
   const moveDirection = new THREE.Vector3();
+
   if (forward !== 0) {
     moveDirection.add(cameraForward.multiplyScalar(forward));
   }
@@ -82,7 +82,11 @@ export function moveCamera(camera, forward, right, up, speed) {
     moveDirection.add(cameraUp.multiplyScalar(up));
   }
 
-  camera.position.add(moveDirection.multiplyScalar(speed));
+  if (speed !== 0) {
+    moveDirection.multiplyScalar(speed);
+  }
+
+  camera.position.add(moveDirection);
 }
 
 export function createCameraEvents(camera) {
@@ -105,57 +109,57 @@ function onKeyDown(camera, event) {
     case 87 /*W*/:
       event.stopPropagation();
       event.preventDefault();
-      camera.state.movement.forward = DEFAULT_MOVEMENT_STEP;
-      camera.state.flags.isMoving = true;
+      camera.movement.forward = DEFAULT_MOVEMENT_STEP;
+      camera.isMoving = true;
       break;
     case 83 /*S*/:
       event.stopPropagation();
       event.preventDefault();
-      camera.state.movement.forward = -DEFAULT_MOVEMENT_STEP;
-      camera.state.flags.isMoving = true;
+      camera.movement.forward = -DEFAULT_MOVEMENT_STEP;
+      camera.isMoving = true;
       break;
     case 65 /*A*/:
       event.stopPropagation();
       event.preventDefault();
-      camera.state.movement.right = -DEFAULT_MOVEMENT_STEP;
-      camera.state.flags.isMoving = true;
+      camera.movement.right = -DEFAULT_MOVEMENT_STEP;
+      camera.isMoving = true;
       break;
     case 68 /*D*/:
       event.stopPropagation();
       event.preventDefault();
-      camera.state.movement.right = DEFAULT_MOVEMENT_STEP;
-      camera.state.flags.isMoving = true;
+      camera.movement.right = DEFAULT_MOVEMENT_STEP;
+      camera.isMoving = true;
       break;
     case 32 /*SPACE*/:
       event.stopPropagation();
       event.preventDefault();
-      camera.state.movement.up = DEFAULT_MOVEMENT_STEP;
-      camera.state.flags.isMoving = true;
+      camera.movement.up = DEFAULT_MOVEMENT_STEP;
+      camera.isMoving = true;
       break;
     case 17 /*CTRL*/:
       event.stopPropagation();
       event.preventDefault();
-      camera.state.movement.up = -DEFAULT_MOVEMENT_STEP;
-      camera.state.flags.isMoving = true;
+      camera.movement.up = -DEFAULT_MOVEMENT_STEP;
+      camera.isMoving = true;
       break;
     case 61 /*=*/:
       event.stopPropagation();
       event.preventDefault();
-      camera.state.movement.speed += DEFAULT_MOVEMENT_SPEED;
+      camera.movement.speed += DEFAULT_MOVEMENT_SPEED;
       break;
     case 173 /*-*/:
       event.stopPropagation();
       event.preventDefault();
-      camera.state.movement.speed = Math.max(
+      camera.movement.speed = Math.max(
         0,
-        camera.state.movement.speed - DEFAULT_MOVEMENT_SPEED,
+        camera.movement.speed - DEFAULT_MOVEMENT_SPEED,
       );
       break;
     case 48 /*0*/:
       event.stopPropagation();
       event.preventDefault();
       // Reset speed
-      camera.state.movement.speed = camera.state.default.movement.speed;
+      camera.movement.speed = camera.default.movement.speed;
       break;
     case 82 /*R*/:
       event.stopPropagation();
@@ -171,18 +175,18 @@ function onKeyUp(camera, event) {
   switch (event.keyCode) {
     case 87 /*W*/:
     case 83 /*S*/:
-      camera.state.movement.forward = 0;
-      camera.state.flags.isMoving = false;
+      camera.movement.forward = 0;
+      camera.isMoving = false;
       break;
     case 65 /*A*/:
     case 68 /*D*/:
-      camera.state.movement.right = 0;
-      camera.state.flags.isMoving = false;
+      camera.movement.right = 0;
+      camera.isMoving = false;
       break;
     case 32 /*SPACE*/:
     case 17 /*CTRL*/:
-      camera.state.movement.up = 0;
-      camera.state.flags.isMoving = false;
+      camera.movement.up = 0;
+      camera.isMoving = false;
       break;
   }
 }
@@ -193,57 +197,57 @@ let endScroll = null;
 
 function onScroll(camera, event) {
   const dir = event.deltaY < 0 ? 1 : -1;
-  camera.state.movement.forward =
+  camera.movement.forward =
     dir *
     DEFAULT_MOVEMENT_STEP *
     // Normalize the camera speed
     ((DEFAULT_MOVEMENT_SPEED /
       Math.sqrt(
-        Math.pow(camera.state.movement.speed, 2) +
+        Math.pow(camera.movement.speed, 2) +
           Math.pow(DEFAULT_MOVEMENT_SPEED, 2),
       )) *
       // Multiply the normalized speed by a factor
       ZOOM_FACTOR);
-  camera.state.flags.isMoving = true;
+  camera.isMoving = true;
 
   clearTimeout(endScroll);
   endScroll = setTimeout(() => {
-    camera.state.movement.forward = 0;
-    camera.state.flags.isMoving = false;
+    camera.movement.forward = 0;
+    camera.isMoving = false;
   }, 100);
 }
 
 // Looking
 
 function onMouseDown(camera, event) {
-  if (!camera.state.flags.isLooking) {
-    camera.state.flags.isLooking = true;
+  if (!camera.isLooking) {
+    camera.isLooking = true;
   }
 }
 
 function onMouseMove(camera, event) {
-  if (camera.state.flags.isLooking) {
+  if (camera.isLooking) {
     if (
-      camera.state.events.prevMouseX !== null &&
-      camera.state.events.prevMouseY !== null
+      camera.events.prevMouseX !== null &&
+      camera.events.prevMouseY !== null
     ) {
-      const dx = event.clientX - camera.state.events.prevMouseX;
-      const dy = event.clientY - camera.state.events.prevMouseY;
+      const dx = event.clientX - camera.events.prevMouseX;
+      const dy = event.clientY - camera.events.prevMouseY;
 
-      camera.state.direction.yaw += dx * camera.state.direction.sensitivity;
-      camera.state.direction.pitch -= dy * camera.state.direction.sensitivity;
+      camera.yaw += dx * camera.sensitivity;
+      camera.pitch -= dy * camera.sensitivity;
 
-      camera.roll(camera.state.direction.pitch, camera.state.direction.yaw);
+      camera.roll(camera.pitch, camera.yaw);
     }
-    camera.state.events.prevMouseX = event.clientX;
-    camera.state.events.prevMouseY = event.clientY;
+    camera.events.prevMouseX = event.clientX;
+    camera.events.prevMouseY = event.clientY;
   }
 }
 
 function onMouseUp(camera, event) {
-  if (camera.state.flags.isLooking) {
-    camera.state.events.prevMouseX = null;
-    camera.state.events.prevMouseY = null;
-    camera.state.flags.isLooking = false;
+  if (camera.isLooking) {
+    camera.events.prevMouseX = null;
+    camera.events.prevMouseY = null;
+    camera.isLooking = false;
   }
 }

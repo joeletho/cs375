@@ -6,6 +6,14 @@ import {
   setDefaultState,
 } from "./cameraUtils";
 
+function initSettings(camera, options) {
+  camera.origin = new THREE.Vector3();
+  setDefaultState(camera);
+  if (options.enableEvents) {
+    createCameraEvents(camera);
+  }
+}
+
 export class PerspectiveCamera extends THREE.PerspectiveCamera {
   constructor(
     fov = 50,
@@ -16,27 +24,15 @@ export class PerspectiveCamera extends THREE.PerspectiveCamera {
   ) {
     super(fov, aspect, near, far);
     this.aspect = aspect;
-
-    setDefaultState(this);
-    this.state.default.direction.lookAt = calculateLookAt(this, 0, 0);
-
-    if (options.enableEvents) {
-      createCameraEvents(this);
-    }
+    initSettings(this, options);
   }
 
   setOrigin(x, y, z) {
     if (x === null || y === null || z === null) {
       throw new Error("setOrigin(): Values are undefined");
     }
-    this.origin = new THREE.Vector3(x, y, z);
-    this.state.flags.originChanged = true;
-  }
-
-  setDefaultRoll(pitch, yaw) {
-    this.state.default.direction.pitch = pitch;
-    this.state.default.direction.yaw = yaw;
-    this.state.default.direction.lookAt = calculateLookAt(this, pitch, yaw);
+    this.origin.set(x, y, z);
+    this.originChanged = true;
   }
 
   setAspect(aspect) {
@@ -44,17 +40,11 @@ export class PerspectiveCamera extends THREE.PerspectiveCamera {
   }
 
   reset() {
-    if (this.origin === null) {
-      throw new Error("reset(): Origin is not defined");
-    }
     this.position.copy(this.origin);
-    this.state.movement.speed = this.state.default.movement.speed;
-    this.roll(
-      this.state.default.direction.pitch,
-      this.state.default.direction.yaw,
-    );
-    this.zoom = this.state.default.direction.zoom;
-    super.lookAt(this.state.default.direction.lookAt);
+    this.movement.speed = this.default.movement.speed;
+    this.roll(this.default.pitch, this.default.yaw);
+    this.zoom = this.default.zoom;
+    this.lookAt(this.default.direction);
   }
 
   setZoom(factor) {
@@ -62,18 +52,33 @@ export class PerspectiveCamera extends THREE.PerspectiveCamera {
   }
 
   roll(pitch, yaw) {
-    if (this.state.flags.isLocked) {
+    if (this.isLocked) {
       return;
     }
     super.lookAt(calculateLookAt(this, pitch, yaw));
   }
 
-  lookAtObject(object) {
-    super.lookAt(object.position);
-  }
-
   move(forward, right, up, speed) {
+    const prevPosition = this.position.clone();
+    const prevRotation = this.rotation.clone();
+
     moveCamera(this, forward, right, up, speed);
+    this.updateProjectionMatrix();
+
+    this.dispatchEvent({
+      type: "move",
+      id: this.id,
+      prevPosition,
+      prevRotation,
+      position: this.position.clone(),
+      rotation: this.rotation.clone(),
+      forward: forward,
+      right: right,
+      up: up,
+      speed: speed,
+      // This is so we can get the normal speed of the camera, not the passed value
+      defaultSpeed: this.movement.speed,
+    });
   }
 
   setPosition(x, y, z) {
@@ -95,24 +100,32 @@ export class PerspectiveCamera extends THREE.PerspectiveCamera {
   }
 
   update() {
-    if (!this.state.flags.isLocked && this.state.flags.isMoving) {
-      this.move(
-        this.state.movement.forward,
-        this.state.movement.right,
-        this.state.movement.up,
-        this.state.movement.speed,
-      );
-    }
-    if (this.state.flags.originChanged) {
+    let updated = false;
+
+    if (this.originChanged) {
       this.position.copy(this.origin);
-      this.state.flags.originChanged = false;
+      this.originChanged = false;
     }
-    this.updateProjectionMatrix();
+
+    if (!this.isLocked && this.isMoving) {
+      this.move(
+        this.movement.forward,
+        this.movement.right,
+        this.movement.up,
+        this.movement.speed,
+      );
+      updated = true;
+    }
+
+    if (!updated) {
+      this.updateProjectionMatrix();
+    }
 
     this.dispatchEvent({
       type: "update",
-      position: this.position,
-      rotation: this.rotation,
+      id: this.id,
+      position: this.position.clone(),
+      rotation: this.rotation.clone(),
     });
   }
 }
@@ -128,35 +141,25 @@ export class OrthographicCamera extends THREE.OrthographicCamera {
     options = { enableEvents: false },
   ) {
     super(left, right, top, bottom, near, far);
-
-    setDefaultState(this);
-    this.state.default.direction.lookAt = calculateLookAt(this, 0, 0);
-
-    if (options.enableEvents) {
-      createCameraEvents(this);
-    }
+    initSettings(this, options);
   }
 
   setOrigin(x, y, z) {
     if (x === null || y === null || z === null) {
       throw new Error("setOrigin(): Values are undefined");
     }
-    this.origin = new THREE.Vector3(x, y, z);
-    this.state.flags.originChanged = true;
-  }
-
-  setDefaultRoll(pitch, yaw) {
-    this.state.default.direction.lookAt = calculateLookAt(this, pitch, yaw);
+    this.origin.set(x, y, z);
+    this.originChanged = true;
   }
 
   reset() {
     if (this.origin === null) {
       throw new Error("reset(): Origin is not defined");
     }
-    this.state.movement.speed = this.state.default.movement.speed;
+    this.movement.speed = this.default.movement.speed;
     this.position.copy(this.origin);
-    this.zoom = this.state.default.direction.zoom;
-    super.lookAt(this.state.default.direction.lookAt);
+    this.zoom = this.default.zoom;
+    super.lookAt(this.default.direction);
   }
 
   setZoom(factor) {
@@ -164,20 +167,35 @@ export class OrthographicCamera extends THREE.OrthographicCamera {
   }
 
   roll(pitch, yaw) {
-    if (this.state.flags.isLocked) {
+    if (this.isLocked) {
       return;
     }
-    this.state.direction.pitch = pitch;
-    this.state.direction.yaw = yaw;
+    this.pitch = pitch;
+    this.yaw = yaw;
     super.lookAt(calculateLookAt(this, pitch, yaw));
   }
 
-  lookAtObject(object) {
-    super.lookAt(object.position);
-  }
-
   move(forward, right, up, speed) {
-    moveCamera(this, forward, right, up, speed);
+    const prevPosition = this.position.clone();
+    const prevRotation = this.rotation.clone();
+
+    moveCamera(this, forward, right, up, speed, 81);
+    this.updateProjectionMatrix();
+
+    this.dispatchEvent({
+      type: "move",
+      id: this.id,
+      prevPosition,
+      prevRotation,
+      position: this.position.clone(),
+      rotation: this.rotation.clone(),
+      forward: forward,
+      right: right,
+      up: up,
+      speed: speed,
+      // This is so we can get the normal speed of the camera, not the passed value
+      defaultSpeed: this.movement.speed,
+    });
   }
 
   setPosition(x, y, z) {
@@ -198,27 +216,36 @@ export class OrthographicCamera extends THREE.OrthographicCamera {
   }
 
   lock(value) {
-    this.state.flags.isLocked = value;
+    this.isLocked = value;
   }
 
   update() {
-    if (!this.state.flags.isLocked && this.state.flags.isMoving) {
-      this.move(
-        this.state.movement.forward,
-        this.state.movement.right,
-        this.state.movement.up,
-        this.state.movement.speed,
-      );
-    }
-    if (this.state.flags.originChanged) {
+    let updated = false;
+
+    if (this.originChanged) {
       this.position.copy(this.origin);
-      this.state.flags.originChanged = false;
+      this.originChanged = false;
     }
-    this.updateProjectionMatrix();
+
+    if (!this.isLocked && this.isMoving) {
+      this.move(
+        this.movement.forward,
+        this.movement.right,
+        this.movement.up,
+        this.movement.speed,
+      );
+      updated = true;
+    }
+
+    if (!updated) {
+      this.updateProjectionMatrix();
+    }
+
     this.dispatchEvent({
       type: "update",
-      position: this.position,
-      rotation: this.rotation,
+      id: this.id,
+      position: this.position.clone(),
+      rotation: this.rotation.clone(),
     });
   }
 }

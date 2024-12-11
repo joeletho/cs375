@@ -3,6 +3,7 @@ import { Body } from "./body";
 import { Planet } from "./planet";
 
 import { CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
+import { Sun } from "./sun";
 
 const METER = 7.187005893344844e-7 / 0.5;
 const KM = 1000 * METER;
@@ -16,7 +17,11 @@ const VENUS_RADIUS = EARTH_RADIUS;
 const MARS_RADIUS = EARTH_RADIUS * 0.5;
 const JUPITER_RADIUS = EARTH_RADIUS * 11;
 const SATURN_RADIUS = EARTH_RADIUS * 9;
+const SATURN_RING_INNER = SATURN_RADIUS + 7000 * KM;
+const SATURN_RING_OUTER = SATURN_RADIUS + 80_000 * KM;
 const URANUS_RADIUS = EARTH_RADIUS * 4;
+const URANUS_RING_INNER = URANUS_RADIUS + 38_000 * KM;
+const URANUS_RING_OUTER = URANUS_RADIUS + 98_000 * KM;
 const NEPTUNE_RADIUS = EARTH_RADIUS * 4;
 
 const SUN_DISTANCE = 0;
@@ -49,23 +54,30 @@ const SATURN_PERIOD = EARTH_PERIOD * 29.46; // Saturn takes about 29.46 Earth ye
 const URANUS_PERIOD = EARTH_PERIOD * 84.02; // Uranus takes about 84.02 Earth years
 const NEPTUNE_PERIOD = EARTH_PERIOD * 164.79; // Neptune takes about 164.79 Earth years
 
-export function initSolarSystem(scene) {
-  const stars = createStars();
-  scene.add(stars);
+export async function initSolarSystem(onload) {
+  async function andThenGodSneezed() {
+    const stars = createStars();
+    const solarSystem = new THREE.Group();
+    solarSystem.add(stars);
 
-  const sun = createSun();
-  sun.add(createMercury());
-  sun.add(createVenus());
-  sun.add(createEarth());
-  sun.add(createMars());
-  sun.add(createJupiter());
-  sun.add(createSaturn());
-  sun.add(createUranus());
-  sun.add(createNeptune());
+    const sun = createSun();
+    const planets = new THREE.Group();
+    planets.name = "Planets";
 
-  const group = new THREE.Group();
-  group.add(sun);
-  scene.add(group);
+    planets.add(createMercury());
+    planets.add(createVenus());
+    planets.add(createEarth());
+    planets.add(createMars());
+    planets.add(createJupiter());
+    planets.add(createSaturn());
+    planets.add(createUranus());
+    planets.add(createNeptune());
+
+    sun.add(planets);
+    solarSystem.add(sun);
+    return solarSystem;
+  }
+  onload(await andThenGodSneezed());
 }
 
 function createStars() {
@@ -90,14 +102,64 @@ function createStars() {
 }
 
 function createSun() {
-  const sun = createBody("Sun", 0xffff00, SUN_RADIUS, SUN_DISTANCE);
+  const texturePath = "textures/sun.jpg";
+  const sun = new Sun({
+    name: "Sun",
+    texturePath: texturePath,
+    radius: SUN_RADIUS,
+    origin: SUN_DISTANCE,
+    color: 0xffbe33,
+    lightColor: 0xffffff,
+    lightIntensity: 12,
+  });
   sun.setPeriod(0);
   sun.setRotationSpeed(SUN_ROTATION_SPEED);
+
   return sun;
 }
 
-function createBody(name, color, radius, distance) {
-  const body = new Body(name, color, radius, distance);
+function createPlanet({
+  name,
+  texturePath,
+  color,
+  radius,
+  distance,
+  axisX,
+  axisY,
+  axisZ,
+  ringTexturePath,
+  ringInnerRadius,
+  ringOuterRadius,
+  ringColor = 0xffffff,
+  ringHeight,
+  ringTransparent,
+  ringOpacity,
+  ringAxisX,
+  ringAxisY,
+  ringAxisZ,
+}) {
+  const planet = new Planet({
+    name: name,
+    texturePath: texturePath,
+    color: color,
+    radius: radius,
+    distance: distance,
+    axisX: axisX,
+    axisY: axisY,
+    axisZ: axisZ,
+    ring: {
+      texturePath: ringTexturePath,
+      innerRadius: ringInnerRadius,
+      outerRadius: ringOuterRadius,
+      color: ringColor,
+      height: ringHeight,
+      transparent: ringTransparent,
+      opacity: ringOpacity,
+      axisX: ringAxisX,
+      axisY: ringAxisY,
+      axisZ: ringAxisZ,
+    },
+  });
 
   const labelDiv = document.createElement("div");
   labelDiv.className = "planet-label";
@@ -107,141 +169,172 @@ function createBody(name, color, radius, distance) {
   const label = new CSS2DObject(labelDiv);
 
   label.position.set(0, radius * 1.5, 0); // Position the label just above the planet
-  body.add(label);
-
-  return body;
-}
-
-function createPlanetGroup(planetName, color, radius, distance, moons = null) {
-  const planet = new Planet(planetName, color, radius, distance);
-
-  if (moons) {
-    if (!Array.isArray(moons)) {
-      planet.add(moons);
-    } else {
-      moons.forEach((moon, _) => {
-        planet.add(moon);
-      });
-    }
-  }
-
-  const labelDiv = document.createElement("div");
-  labelDiv.className = "planet-label";
-  labelDiv.textContent = planetName;
-  labelDiv.style.color = "white";
-  labelDiv.style.backgroundColor = "transparent";
-  const label = new CSS2DObject(labelDiv);
-
-  label.position.set(0, radius * 5, 0); // Position the label just above the planet
-
   planet.add(label);
 
   return planet;
 }
 
 function createMercury() {
-  const mercury = createPlanetGroup(
-    "Mercury",
-    0x8a7f80,
-    MERCURY_RADIUS,
-    MERCURY_DISTANCE,
-  );
+  const texturePath = "textures/mercury.jpg";
+  const mercury = createPlanet({
+    name: "Mercury",
+    texturePath: texturePath,
+    radius: MERCURY_RADIUS,
+    distance: MERCURY_DISTANCE,
+    axisX: THREE.MathUtils.degToRad(-0.1),
+  });
   mercury.setPeriod(MERCURY_PERIOD);
   mercury.setRotationSpeed(MERCURY_ROTATION_SPEED);
   return mercury;
 }
 
 function createVenus() {
-  const venus = createPlanetGroup(
-    "Venus",
-    0xffc87c,
-    VENUS_RADIUS,
-    VENUS_DISTANCE,
-  );
+  const texturePath = "textures/venus.jpg";
+  const venus = createPlanet({
+    name: "Venus",
+    texturePath: texturePath,
+    color: 0xffe67e,
+    radius: VENUS_RADIUS,
+    distance: VENUS_DISTANCE,
+    axisZ: THREE.MathUtils.degToRad(3),
+  });
   venus.setPeriod(VENUS_PERIOD);
   venus.setRotationSpeed(VENUS_ROTATION_SPEED);
   return venus;
 }
 
 function createEarth() {
-  const moon = createBody("Luna", 0xa9a9a9, EARTH_RADIUS * 0.25, 384400 * KM);
-  moon.setRotationSpeed(0);
-  moon.setPeriod(2);
-
-  const earth = createPlanetGroup(
-    "Earth",
-    0x6495ed,
-    EARTH_RADIUS,
-    EARTH_DISTANCE,
-    moon,
-  );
+  const earthTexturePath = "textures/earth.jpg";
+  const earth = createPlanet({
+    name: "Earth",
+    texturePath: earthTexturePath,
+    color: 0x73b3ff,
+    radius: EARTH_RADIUS,
+    distance: EARTH_DISTANCE,
+    axisZ: THREE.MathUtils.degToRad(-23),
+  });
   earth.setRotationSpeed(EARTH_ROTATION_SPEED);
   earth.setPeriod(EARTH_PERIOD);
 
+  const moonTexturePath = "textures/luna.jpg";
+  const moon = createPlanet({
+    name: "Luna",
+    texturePath: moonTexturePath,
+    radius: EARTH_RADIUS * 0.25,
+    distance: 384400 * KM,
+  });
+  moon.setRotationSpeed(0);
+  moon.setPeriod(2);
+  earth.add(moon);
   return earth;
 }
 
 function createMars() {
-  const phobos = createBody("Phobos", undefined, 110 * METER, MARS_RADIUS * 8);
-  phobos.setRotationSpeed(0);
-  phobos.setPeriod(2);
+  const marsTexturePath = "textures/mars.jpg";
+  const mars = createPlanet({
+    name: "Mars",
+    texturePath: marsTexturePath,
+    color: 0xfd9696,
+    radius: MARS_RADIUS,
+    distance: MARS_DISTANCE,
+    axisZ: THREE.MathUtils.degToRad(-25),
+  });
 
-  const deimos = createBody("Deimos", undefined, 60 * METER, MARS_RADIUS * 6);
-  deimos.setRotationSpeed(0);
-  deimos.setPeriod(2);
-
-  const mars = createPlanetGroup("Mars", 0x6495ed, MARS_RADIUS, MARS_DISTANCE, [
-    phobos,
-    deimos,
-  ]);
   mars.setRotationSpeed(MARS_ROTATION_SPEED);
   mars.setPeriod(MARS_PERIOD);
+
+  const phobosTexturePath = "textures/ceres.jpg";
+  const phobos = createPlanet({
+    name: "Phobos",
+    texturePath: phobosTexturePath,
+    radius: 110 * METER,
+    distance: MARS_RADIUS * 8,
+  });
+  phobos.setRotationSpeed(0);
+  phobos.setPeriod(2);
+  mars.add(phobos);
+
+  const deimosTexturePath = "textures/haumea.jpg";
+  const deimos = createPlanet({
+    name: "Deimos",
+    texturePath: deimosTexturePath,
+    radius: 60 * METER,
+    distance: MARS_RADIUS * 6,
+  });
+  deimos.setRotationSpeed(0);
+  deimos.setPeriod(2);
+  mars.add(deimos);
   return mars;
 }
 
 function createJupiter() {
-  const jupiter = createPlanetGroup(
-    "Jupiter",
-    0x6495ed,
-    JUPITER_RADIUS,
-    JUPITER_DISTANCE,
-  );
+  const texturePath = "textures/jupiter.jpg";
+  const jupiter = createPlanet({
+    name: "Jupiter",
+    texturePath: texturePath,
+    color: 0xffbd7b,
+    radius: JUPITER_RADIUS,
+    distance: JUPITER_DISTANCE,
+    axisZ: THREE.MathUtils.degToRad(-3),
+  });
   jupiter.setRotationSpeed(JUPITER_ROTATION_SPEED);
   jupiter.setPeriod(JUPITER_PERIOD);
   return jupiter;
 }
 
 function createSaturn() {
-  const saturn = createPlanetGroup(
-    "Saturn",
-    0x6495ed,
-    SATURN_RADIUS,
-    SATURN_DISTANCE,
-  );
+  const ringTexturePath = "textures/saturn_ring.png";
+  const saturnTexturePath = "textures/saturn.jpg";
+  const saturn = createPlanet({
+    name: "Saturn",
+    texturePath: saturnTexturePath,
+    color: 0xffd77b,
+    radius: SATURN_RADIUS,
+    distance: SATURN_DISTANCE,
+    axisZ: THREE.MathUtils.degToRad(-27),
+    ringTexturePath: ringTexturePath,
+    ringInnerRadius: SATURN_RING_INNER,
+    ringOuterRadius: SATURN_RING_OUTER,
+    ringHeight: 10,
+    ringTransparent: true,
+  });
   saturn.setRotationSpeed(SATURN_ROTATION_SPEED);
   saturn.setPeriod(SATURN_PERIOD);
   return saturn;
 }
 
 function createUranus() {
-  const uranus = createPlanetGroup(
-    "Uranus",
-    0x6495ed,
-    URANUS_RADIUS,
-    URANUS_DISTANCE,
-  );
+  const ringTexturePath = "textures/saturn_ring.png";
+  const uranusTexturePath = "textures/uranus.jpg";
+  const uranus = createPlanet({
+    name: "Uranus",
+    texturePath: uranusTexturePath,
+    color: 0xbae6ff,
+    radius: URANUS_RADIUS,
+    distance: URANUS_DISTANCE,
+    axisZ: THREE.MathUtils.degToRad(-97.77),
+    ringTexturePath: ringTexturePath,
+    ringInnerRadius: URANUS_RING_INNER,
+    ringOuterRadius: URANUS_RING_OUTER,
+    ringHeight: 10,
+    ringTransparent: true,
+    ringOpacity: 0.2,
+  });
   uranus.setRotationSpeed(URANUS_ROTATION_SPEED);
   uranus.setPeriod(URANUS_PERIOD);
   return uranus;
 }
 
 function createNeptune() {
-  const neptune = createPlanetGroup(
-    "Neptune",
-    0x6495ed,
-    NEPTUNE_RADIUS,
-    NEPTUNE_DISTANCE,
-  );
+  const texturePath = "textures/neptune.jpg";
+  const neptune = createPlanet({
+    name: "Neptune",
+    texturePath: texturePath,
+    color: 0xb1ccff,
+    radius: NEPTUNE_RADIUS,
+    distance: NEPTUNE_DISTANCE,
+    axisZ: THREE.MathUtils.degToRad(-30),
+  });
   neptune.setRotationSpeed(NEPTUNE_ROTATION_SPEED);
   neptune.setPeriod(NEPTUNE_PERIOD);
   return neptune;

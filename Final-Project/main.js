@@ -7,6 +7,7 @@ import { initSolarSystem } from "./solarSystem.js";
 import { Body } from "./body.js";
 import { GUI } from "lil-gui";
 import { Planet } from "./planet.js";
+import { Sun } from "./sun.js";
 
 let SCREEN_WIDTH = window.innerWidth;
 let SCREEN_HEIGHT = window.innerHeight;
@@ -25,11 +26,12 @@ let gui;
 let userCamera;
 let userScene;
 let userRenderer;
-let labelRenderer;
+let userLabelRenderer;
 
 let previewCamera;
 let previewScene;
 let previewRenderer;
+let previewLabelRenderer;
 
 let previewObject = null;
 let focusedObject = null;
@@ -65,6 +67,8 @@ const objectsStates = objectNames.map((name) => {
   return { name: name, focus: false, lookAt: false };
 });
 
+let sceneInitialized = false;
+
 init();
 
 function init() {
@@ -76,22 +80,36 @@ function init() {
   userCamera = new PerspectiveCamera(fov, aspect, near, far, {
     enableEvents: true,
   });
-  userCamera.setOrigin(0, 0, 0);
-  userCamera.setDefaultRoll(-45, 0);
-  userCamera.reset();
+  userCamera.roll(-45, 0);
 
   // Scene
   userScene = new THREE.Scene();
-  initSolarSystem(userScene);
+  initSolarSystem(function (solarSystem) {
+    solarSystem.updateMatrixWorld(true);
+    userScene.add(solarSystem);
+    solarSystemRoot = solarSystem;
+    // Update the parent for any children that were added async
+    initPreviewCamera();
+    gui = initGUI();
+    // Set default focus and preview objects
+    selectFocusObject(solarSystemRoot, "Sun");
+    selectPreviewObject(solarSystemRoot, "Sun");
+
+    // Listen for world changes to manually update the GUI values
+    userCamera.addEventListener("update", function (event) {
+      gui.controllers.forEach((controller) => controller.updateDisplay());
+    });
+    sceneInitialized = true;
+  });
 
   userRenderer = initRenderer(rootContainer, SCREEN_WIDTH, SCREEN_HEIGHT);
 
   // Label renderer
-  labelRenderer = new CSS2DRenderer();
-  labelRenderer.setSize(window.innerWidth, window.innerHeight);
-  labelRenderer.domElement.style.position = "absolute";
-  labelRenderer.domElement.style.top = "0px";
-  document.body.appendChild(labelRenderer.domElement);
+  userLabelRenderer = initLabelRenderer(
+    rootContainer,
+    window.innerWidth,
+    window.innerHeight,
+  );
 
   // Extras
   stats = new Stats();
@@ -106,10 +124,16 @@ function init() {
       SCREEN_HEIGHT = window.innerHeight;
       aspect = SCREEN_WIDTH / SCREEN_HEIGHT;
       userRenderer.setSize(SCREEN_WIDTH, SCREEN_HEIGHT);
-      labelRenderer.setSize(SCREEN_WIDTH, SCREEN_HEIGHT);
+      userLabelRenderer.setSize(SCREEN_WIDTH, SCREEN_HEIGHT);
     },
     true,
   );
+  // Notify the user before closing the window
+  window.addEventListener("beforeunload", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    return null;
+  });
 }
 
 function initRenderer(container, width, height) {
@@ -122,12 +146,21 @@ function initRenderer(container, width, height) {
   return renderer;
 }
 
+function initLabelRenderer(container, width, height) {
+  userLabelRenderer = new CSS2DRenderer();
+  userLabelRenderer.setSize(width, height);
+  userLabelRenderer.domElement.style.position = "absolute";
+  userLabelRenderer.domElement.style.top = "0px";
+  container.appendChild(userLabelRenderer.domElement);
+  return userLabelRenderer;
+}
+
 function animate() {
   render();
   stats.update();
 }
 
-let objectRoot = null;
+let solarSystemRoot = null;
 let lastTime = Date.now();
 
 function render() {
@@ -136,7 +169,6 @@ function render() {
   lastTime = now;
 
   updateSceneObjects(dt);
-
   updateUserCamera();
   updateUserRenderer();
   updatePreviewCamera();
@@ -147,27 +179,41 @@ function updateUserCamera() {
   userCamera.setAspect(aspect);
 
   if (lookingAt) {
-    const object = getObjectByName(
-      objectRoot,
-      objectsStates.find((state) => state.lookAt).name,
-    );
-    if (!focusedObject) {
-      userCamera.lookAtObject(object);
+    const lookingObjectState = objectsStates.find((state) => state.lookAt);
+    const object = getObjectByName(solarSystemRoot, lookingObjectState.name);
+    const objectWorldPosition = new THREE.Vector3();
+    object.getWorldPosition(objectWorldPosition);
+
+    if (!focusedObject || focusedObject.name !== lookingObjectState.name) {
+      userCamera.lookAt(object.position);
     } else {
-      const offset = new THREE.Vector3(
-        object.radius * 10,
-        object.radius * 5,
-        0,
-      );
-      const objectWorldPosition = new THREE.Vector3();
-      object.getWorldPosition(objectWorldPosition);
+      let cameraPosition = new THREE.Vector3();
 
-      const newCameraPosition = objectWorldPosition.clone().add(offset);
-      userCamera.position.copy(newCameraPosition);
+      if (focusedObject.name === "Sun") {
+        const distanceFromPlanet = object.radius * 10;
+        const directionToPlanet = new THREE.Vector3(1, 0, 0);
+        cameraPosition = objectWorldPosition
+          .clone()
+          .add(directionToPlanet.multiplyScalar(-distanceFromPlanet));
+      } else {
+        const sunPosition = getObjectByName(
+          solarSystemRoot,
+          "Sun",
+        ).position.clone();
+        const directionToPlanet = new THREE.Vector3()
+          .subVectors(objectWorldPosition, sunPosition)
+          .normalize();
+        const distanceFromPlanet = object.radius * 10;
+        cameraPosition = objectWorldPosition
+          .clone()
+          .add(directionToPlanet.multiplyScalar(-distanceFromPlanet));
+      }
 
+      userCamera.position.copy(cameraPosition);
       userCamera.lookAt(objectWorldPosition);
     }
   }
+
   userCamera.update();
 }
 
@@ -176,42 +222,22 @@ function updateUserRenderer() {
   userRenderer.setScissor(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
   userRenderer.setViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
   userRenderer.render(userScene, userCamera);
-  labelRenderer.render(userScene, userCamera);
+  userLabelRenderer.render(userScene, userCamera);
 }
 
 function updateSceneObjects(dt) {
+  if (!sceneInitialized) {
+    return;
+  }
   userScene.traverse(function (obj) {
     if (obj.isGroup) {
       for (let i = 0; i < obj.children.length; i++) {
         const sun = obj.children[i];
-        if (!(sun instanceof Body)) {
-          break;
-        }
-        if (!objectRoot) {
-          objectRoot = obj;
-          initPreviewCamera();
-          gui = initGUI();
-          // Set default focus and preview objects
-          selectFocusObject(objectRoot, "Sun");
-          selectPreviewObject(objectRoot, "Sun");
-
-          userCamera.addEventListener("update", function (event) {
-            gui.controllers.forEach((controller) => controller.updateDisplay());
-          });
+        if (!(sun instanceof Sun)) {
+          continue;
         }
         sun.update(dt);
-        for (let j = 0; j < sun.children.length; j++) {
-          const planetGroup = sun.children[j];
-          if (!planetGroup.isGroup) {
-            if (planetGroup instanceof Body) {
-              planetGroup.update(dt);
-            }
-            continue;
-          }
-          planetGroup.children.forEach((planet) => {
-            planet.update(dt);
-          });
-        }
+        break;
       }
     }
   });
@@ -225,53 +251,23 @@ function updatePreviewRenderer() {
 }
 
 function getObjectByName(root, name) {
-  function findObject(group, name) {
-    if (group.name === name) {
-      return group;
-    }
-
-    //TODO: THIS IS HORRIBLE. FIX LATER
-    for (let i = 0; i < group.children.length; i++) {
-      const obj = group.children[i];
-      if (!(obj instanceof Object) && !(obj instanceof Planet)) {
-        continue;
-      }
-
-      if (obj.name === name) {
-        return obj;
-      }
-      for (let j = 0; j < obj.children.length; j++) {
-        let object;
-        if (obj.isGroup) {
-          object = findObject(obj, name);
-        } else {
-          object = findObject(obj.children[j], name);
-        }
-        if (object) {
-          return object;
-        }
-      }
-    }
+  if (!root) {
     return null;
   }
 
-  return findObject(root, name);
+  return root.getObjectByName(name, true);
 }
 
 function onSelectedObjectUpdate(event) {
   previewObject.rotation.copy(event.rotation);
-  previewObject.position.copy(event.position);
 }
 
-function fitObjectInViewport(camera, object) {
-  const paddingFactor = 1.5;
+function fitPreviewObjectInViewport(camera, object) {
+  const paddingFactor = 2;
   let scale;
-  if (camera.isOrthographicCamera) {
-    scale =
-      camera.getViewportDimensions().width /
-      (2 * object.radius * paddingFactor);
-    camera.setZoom(scale);
-  }
+  scale =
+    camera.getViewportDimensions().width / (2 * object.radius * paddingFactor);
+  camera.setZoom(scale);
 }
 
 function selectFocusObject(objectParent, objectName) {
@@ -289,14 +285,15 @@ function onFocusObjectChange(objectName, focused) {
   setGUIControllerValue(objectSettings, "lookAt", focused);
 
   if (focused) {
-    selectFocusObject(objectRoot, objectName);
+    selectFocusObject(solarSystemRoot, objectName);
   } else {
+    focusedObject = null;
     objectsStates.forEach((state) => (state.focus = false));
   }
 }
 
 function onLookAtObjectChange(objectName, lookAt) {
-  const object = getObjectByName(objectRoot, objectName);
+  const object = getObjectByName(solarSystemRoot, objectName);
   objectsStates.forEach((state) => {
     if (state.name === objectName) {
       if (lookAt) {
@@ -317,22 +314,22 @@ function selectPreviewObject(objectParent, objectName) {
   }
 
   if (previewObject) {
+    // Remove the old object
+    previewScene.remove(previewObject);
+
     // Remove existing event listener
     const prevObj = getObjectByName(objectParent, previewObject.name);
     if (prevObj.hasEventListener("update", onSelectedObjectUpdate)) {
       prevObj.removeEventListener("update", onSelectedObjectUpdate);
     }
-
-    // Erase all objects
-    previewScene.children = [];
   }
 
   obj.addEventListener("update", onSelectedObjectUpdate);
 
-  previewObject = obj.clone(previewObject);
+  previewObject = obj.clone();
   previewScene.add(previewObject);
 
-  fitObjectInViewport(previewCamera, previewObject);
+  fitPreviewObjectInViewport(previewCamera, previewObject);
 }
 
 function updatePreviewCamera() {
@@ -349,7 +346,7 @@ function updatePreviewCamera() {
   }
 
   if (cameraFlags["preview"].lockRotation) {
-    previewCamera.lookAtObject(previewObject);
+    previewCamera.lookAt(previewObject.position);
   }
 }
 
@@ -367,7 +364,12 @@ function initPreviewRenderer() {
 
 function initPreviewCamera() {
   previewCamera = new OrthographicCamera(-2, 2, 2, -2, near, far);
+  previewCamera.setPosition(0, 0, 0);
+
+  const pointLight = new THREE.AmbientLight(0xffffff, 2);
+  previewCamera.add(pointLight);
   previewScene = new THREE.Scene();
+  previewScene.add(previewCamera);
 }
 
 function initGUI() {
@@ -383,8 +385,8 @@ function initGUI() {
   FOLLOW_WIDTH = guiDom.offsetWidth - 5;
   FOLLOW_HEIGHT = FOLLOW_WIDTH;
 
-  const renderer = initPreviewRenderer();
-  guiDom.appendChild(renderer.domElement.parentElement);
+  previewRenderer = initPreviewRenderer();
+  guiDom.appendChild(previewRenderer.domElement.parentElement);
 
   gui.title("Solar Perspective");
 
@@ -397,15 +399,15 @@ function initGUI() {
 
   // Objects
   const objectsFolder = gui.addFolder("Objects").close();
-  makeObjectFolder(objectsFolder, objectRoot, "Sun");
-  makeObjectFolder(objectsFolder, objectRoot, "Mercury");
-  makeObjectFolder(objectsFolder, objectRoot, "Venus");
-  makeObjectFolder(objectsFolder, objectRoot, "Earth");
-  makeObjectFolder(objectsFolder, objectRoot, "Mars");
-  makeObjectFolder(objectsFolder, objectRoot, "Jupiter");
-  makeObjectFolder(objectsFolder, objectRoot, "Saturn");
-  makeObjectFolder(objectsFolder, objectRoot, "Uranus");
-  makeObjectFolder(objectsFolder, objectRoot, "Neptune");
+  makeObjectFolder(objectsFolder, solarSystemRoot, "Sun");
+  makeObjectFolder(objectsFolder, solarSystemRoot, "Mercury");
+  makeObjectFolder(objectsFolder, solarSystemRoot, "Venus");
+  makeObjectFolder(objectsFolder, solarSystemRoot, "Earth");
+  makeObjectFolder(objectsFolder, solarSystemRoot, "Mars");
+  makeObjectFolder(objectsFolder, solarSystemRoot, "Jupiter");
+  makeObjectFolder(objectsFolder, solarSystemRoot, "Saturn");
+  makeObjectFolder(objectsFolder, solarSystemRoot, "Uranus");
+  makeObjectFolder(objectsFolder, solarSystemRoot, "Neptune");
 
   return gui;
 }
@@ -428,7 +430,7 @@ function makeCameraSettingsFolder(controller, name) {
       if (value) {
         if (controller.property === "User") {
         } else {
-          fitObjectInViewport(previewCamera, previewObject);
+          fitPreviewObjectInViewport(previewCamera, previewObject);
         }
       }
       cameraFlags[name].lockCamera = value;
@@ -448,18 +450,18 @@ function makeCameraSettingsFolder(controller, name) {
 
   const rollFolder = controller.addFolder("Roll").close();
   rollFolder
-    .add(getCameraByName(name).state.direction, "pitch", -180, 180)
+    .add(getCameraByName(name), "pitch", -180, 180)
     .listen()
     .onChange((value) => {
       const camera = getCameraByName(name);
-      camera.roll(value, camera.state.direction.yaw);
+      camera.roll(value, camera.yaw);
     });
   rollFolder
-    .add(getCameraByName(name).state.direction, "yaw", -180, 180)
+    .add(getCameraByName(name), "yaw", -180, 180)
     .listen()
     .onChange((value) => {
       const camera = getCameraByName(name);
-      camera.roll(camera.state.direction.pitch, value);
+      camera.roll(camera.pitch, value);
     });
 
   // Rotation

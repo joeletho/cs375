@@ -3,19 +3,13 @@ import * as THREE from "three";
 const ONE_REVOLUTION = 2 * Math.PI;
 
 export class Body extends THREE.Object3D {
-  constructor(name = "", color, radius, distance) {
+  constructor({ name = "", color = null, radius = 0, distance = 0 }) {
     super();
 
     distance =
       typeof distance === "undefined" || isNaN(distance) ? 0 : distance;
     radius = typeof radius === "undefined" || isNaN(radius) ? 0 : radius;
     color = typeof color === "undefined" ? 0xff6fff : color;
-
-    if (radius > 0) {
-      const geometry = new THREE.SphereGeometry(radius, 32, 32);
-      const material = new THREE.MeshBasicMaterial({ color: color });
-      this.add(new THREE.Mesh(geometry, material));
-    }
 
     const axes = new THREE.AxesHelper(radius * 1.2);
     axes.name = "Axes";
@@ -81,7 +75,11 @@ export class Body extends THREE.Object3D {
     if (recursive) {
       this.clear();
       object.children.forEach((child) => {
-        this.add(child.clone(recursive));
+        if (typeof child.clone === "function") {
+          if (!child.type.toLowerCase().includes("helper")) {
+            this.add(child.clone(recursive));
+          }
+        }
       });
     }
 
@@ -89,7 +87,12 @@ export class Body extends THREE.Object3D {
   }
 
   clone(recursive = true) {
-    const cloned = new Body(this.name, this.color, this.radius, this.distance);
+    const cloned = new Body({
+      name: this.name,
+      color: this.color,
+      radius: this.radius,
+      distance: this.distance,
+    });
     cloned.copy(this, recursive);
     return cloned;
   }
