@@ -53,3 +53,7 @@ Once the server is running, you can:
 - View the solar system in your browser.
 - Click on various planets to focus the camera on them.
 - Explore the system by rotating and zooming the camera and moving around in 3D.
+
+## View the Presentation slides
+
+[GoogleSlides Presentation](https://docs.google.com/presentation/d/1t6MFcCY8rKzkjUGR_z7soLAAUhrwYXSeNg2RUK8v9xk/edit?usp=sharing)
